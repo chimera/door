@@ -46,12 +46,11 @@ func (d *doorlock) Unlock() (err error) {
 		// Attempt to connect to the given serial port.
 		conn, err := d.connect(port)
 		if err != nil {
-			// fmt.Println(err)
 			continue
 		}
 		defer d.disconnect(conn)
 
-		// Attempt to unlock door
+		// Attempt to unlock door by sending "1" over to the Arduino.
 		_, err = conn.Write([]byte("1"))
 		if err != nil {
 			return fmt.Errorf("Could not unlock door, with error: %s", err)
