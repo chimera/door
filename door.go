@@ -2,77 +2,70 @@ package door
 
 import (
 	"fmt"
+	"os"
+	"os/signal"
+	"time"
 
-	"github.com/chimera/rs232"
+	"github.com/davecheney/gpio"
+	"github.com/davecheney/gpio/rpi"
+)
+
+const (
+	openDelay = 6
 )
 
 type doorlock struct {
-	baud  int
-	ports []string
+	pin gpio.Pin
 }
 
-func (d *doorlock) connect(port string) (conn *rs232.Port, err error) {
+func (d *doorlock) connect() (err error) {
 
-	// fmt.Println("Connecting to door lock...")
+	// Lock door on exit
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	go func() {
+		for _ = range c {
+			fmt.Printf("\nClearing and unexporting the pin.\n")
+			d.disconnect()
+		}
+	}()
 
-	// Configure the serial connection.
-	options := rs232.Options{
-		BitRate:  uint32(d.baud),
-		DataBits: 8,
-		StopBits: 1,
-		Parity:   rs232.PARITY_NONE,
-		Timeout:  0,
-	}
-
-	// Open a connection to the serial port.
-	conn, err = rs232.Open(port, options)
+	// Create a connection with the door.
+	pin, err := gpio.OpenPin(rpi.GPIO25, gpio.ModeOutput)
 	if err != nil {
-		return &rs232.Port{}, fmt.Errorf("Could not connect to port %s", port)
+		return fmt.Errorf("Error opening pin! %s\n", err)
 	}
 
-	return conn, nil
+	d.pin = pin
+	return nil
 }
 
-func (d *doorlock) disconnect(conn *rs232.Port) {
-	// fmt.Println("Disconnecting from door lock...")
-	conn.Close()
+func (d *doorlock) disconnect() {
+	d.pin.Clear()
+	d.pin.Close()
+	os.Exit(0)
 }
 
 func (d *doorlock) Unlock() (err error) {
 
-	// Loop over the available ports and try to connect in order.
-	for _, port := range d.ports {
-
-		// Attempt to connect to the given serial port.
-		conn, err := d.connect(port)
-		if err != nil {
-			continue
-		}
-		defer d.disconnect(conn)
-
-		// Attempt to unlock door by sending "1" over to the Arduino.
-		_, err = conn.Write([]byte("1"))
-		if err != nil {
-			return fmt.Errorf("Could not unlock door, with error: %s", err)
-		}
-
-		return nil
+	// Connect to the door
+	err = d.connect()
+	if err != nil {
+		return err
 	}
 
-	// None of the expected ports could be connected to.
-	return fmt.Errorf("Failed to connect to all available ports!")
+	// Open the door
+	d.pin.Set()
+
+	// Wait to lock the door
+	time.Sleep(openDelay * time.Second)
+
+	// Lock the door after the delay
+	d.pin.Clear()
+
+	return nil
 }
 
 func NewDoorLock() doorlock {
-	return doorlock{
-		baud: 19200,
-		// TODO: This shouldn't be hard coded, ideally.
-		ports: []string{
-			"/dev/ttyACM0",
-			"/dev/ttyACM1",
-			"/dev/ttyACM2",
-			"/dev/tty.usbmodem411",
-			"/dev/tty.usbmodem621",
-		},
-	}
+	return doorlock{}
 }
